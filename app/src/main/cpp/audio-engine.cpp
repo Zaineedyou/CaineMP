@@ -3,6 +3,7 @@
 #include <cstring>
 #include <fstream>
 #include <cstdint>
+#include <inttypes.h>
 
 #define TAG "AudioEngine"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
@@ -154,7 +155,7 @@ void AudioEngine::stop() {
 }
 
 void AudioEngine::seekTo(int64_t positionMs) {
-    LOGI("Seeking to position: %lld ms", positionMs);
+    LOGI("Seeking to position: %" PRId64 " ms", positionMs);
     
     if (durationMs_.load() <= 0) {
         LOGD("No audio file loaded");
@@ -175,7 +176,7 @@ void AudioEngine::seekTo(int64_t positionMs) {
     }
     
     currentPositionMs_.store(positionMs);
-    LOGI("Seek completed to %lld ms", positionMs);
+    LOGI("Seek completed to %" PRId64 " ms", positionMs);
 }
 
 int32_t AudioEngine::getSessionId() const {
@@ -442,7 +443,7 @@ bool AudioEngine::decodeAudioFile(const std::string& filePath) {
     int64_t durationMs = (numFrames * 1000) / sampleRate_;
     durationMs_.store(durationMs);
     
-    LOGI("WAV decoded successfully: %lld ms duration", durationMs);
+    LOGI("WAV decoded successfully: %" PRId64 " ms duration", durationMs);
     return true;
 }
 
