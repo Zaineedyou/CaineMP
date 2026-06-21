@@ -270,7 +270,7 @@ Result AudioEngine::createAudioStream() {
     builder.setContentType(ContentType::Music);
     builder.setCallback(this);
     
-    Result result = builder.openStream(&audioStream_);
+    Result result = builder.openStream(audioStream_);
     if (result != Result::OK) {
         LOGE("Failed to open audio stream: %s", convertToText(result));
         return result;
