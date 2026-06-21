@@ -94,7 +94,7 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-test-manifest:1.6.4")
 
     // Oboe Audio Library (for AAudio/OpenSL ES)
-    implementation("com.google.oboe:oboe:1.10.2")
+    implementation("com.google.oboe:oboe:1.10.0")
 
     // Media & File Access
     implementation("androidx.media:media:1.7.0")
