@@ -87,7 +87,7 @@ dependencies {
 
     // Jetpack Compose
     implementation("androidx.compose.ui:ui:1.6.4")
-    implementation("androidx.compose.ui:ui-graphics:1.6.4"prefab
+    implementation("androidx.compose.ui:ui-graphics:1.6.4")
     implementation("androidx.compose.ui:ui-tooling-preview:1.6.4")
     implementation("androidx.compose.material3:material3:1.2.0")
     debugImplementation("androidx.compose.ui:ui-tooling:1.6.4")
