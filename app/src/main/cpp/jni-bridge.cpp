@@ -1,6 +1,7 @@
 #include <jni.h>
 #include "audio-engine.h"
 #include <android/log.h>
+#include <inttypes.h>
 
 #define TAG "JNIBridge"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
@@ -144,7 +145,7 @@ Java_com_example_bitperfect_audio_AudioPlayer_nativeSeekTo(
     jobject thiz,
     jlong positionMs) {
     
-    LOGI("nativeSeekTo: %lld ms", positionMs);
+    LOGI("nativeSeekTo: %" PRId64 " ms", positionMs);
     
     try {
         if (g_audioEngine != nullptr) {
