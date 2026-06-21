@@ -1,0 +1,39 @@
+# Gradle
+.gradle/
+build/
+*.apk
+*.aar
+
+# Android Studio
+.idea/
+*.iml
+*.iws
+*.ipr
+local.properties
+
+# NDK
+.cxx/
+
+# Node modules
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+*.swp
+*.swo
+
+# Build artifacts
+*.o
+*.so
+*.a
+
+# Misc
+.env
+.env.local
+*.log

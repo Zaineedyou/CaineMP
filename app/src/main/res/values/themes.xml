@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.BitPerfectPlayer" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:colorPrimary">@color/md_theme_light_primary</item>
+        <item name="android:colorSecondary">@color/md_theme_light_secondary</item>
+        <item name="android:colorTertiary">@color/md_theme_light_tertiary</item>
+        <item name="android:statusBarColor">@color/md_theme_light_background</item>
+        <item name="android:navigationBarColor">@color/md_theme_light_background</item>
+    </style>
+
+    <color name="md_theme_light_primary">#006A4E</color>
+    <color name="md_theme_light_secondary">#4F6358</color>
+    <color name="md_theme_light_tertiary">#386666</color>
+    <color name="md_theme_light_background">#FFFBFE</color>
+    <color name="md_theme_light_surface">#FFFBFE</color>
+</resources>

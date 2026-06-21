@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">CaineMP</string>
+    <string name="play">Play</string>
+    <string name="pause">Pause</string>
+    <string name="stop">Stop</string>
+    <string name="select_file">Select Audio File</string>
+    <string name="no_file_selected">No file selected</string>
+    <string name="now_playing">Now Playing</string>
+    <string name="duration">Duration</string>
+    <string name="position">Position</string>
+    <string name="audio_engine_error">Audio Engine Error</string>
+    <string name="file_not_found">File not found</string>
+</resources>
