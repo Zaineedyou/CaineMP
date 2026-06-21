@@ -1,6 +1,6 @@
 package com.example.bitperfect.ui.theme
 
-import androidx.compose.foundation.isSystemInDarkMode
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
@@ -74,7 +74,7 @@ private val DarkColorScheme = darkColorScheme(
 
 @Composable
 fun BitPerfectPlayerTheme(
-    darkTheme: Boolean = isSystemInDarkMode(),
+    darkTheme: Boolean = isSystemInDarkTheme(),
     content: @Composable () -> Unit
 ) {
     val colorScheme = when {
