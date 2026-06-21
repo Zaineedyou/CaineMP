@@ -200,7 +200,7 @@ fun PlayerScreen(context: Context) {
                 containerColor = MaterialTheme.colorScheme.secondary
             ) {
                 Icon(
-                    imageVector = Icons.Default.Pause,
+                    imageVector = Icons.Filled.Pause,
                     contentDescription = "Pause",
                     tint = Color.White
                 )
@@ -217,7 +217,7 @@ fun PlayerScreen(context: Context) {
                 containerColor = MaterialTheme.colorScheme.tertiary
             ) {
                 Icon(
-                    imageVector = Icons.Default.Stop,
+                    imageVector = Icons.Filled.Stop,
                     contentDescription = "Stop",
                     tint = Color.White
                 )
