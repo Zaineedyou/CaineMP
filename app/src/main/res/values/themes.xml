@@ -3,7 +3,6 @@
     <style name="Theme.BitPerfectPlayer" parent="Theme.Material3.Light.NoActionBar">
         <item name="android:colorPrimary">@color/md_theme_light_primary</item>
         <item name="android:colorSecondary">@color/md_theme_light_secondary</item>
-        <item name="colorTertiary">@color/md_theme_light_tertiary</item>
         <item name="android:statusBarColor">@color/md_theme_light_background</item>
         <item name="android:navigationBarColor">@color/md_theme_light_background</item>
     </style>
