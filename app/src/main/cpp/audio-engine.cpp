@@ -256,12 +256,11 @@ void AudioEngine::onErrorAfterClose(AudioStream* audioStream, Result error) {
 // ==================== Private Helper Methods ====================
 
 Result AudioEngine::createAudioStream() {
-    LOGI("Creating AAudio stream with Exclusive Mode");
+    LOGI("Creating AAudio stream");
     
     AudioStreamBuilder builder;
     
     builder.setDirection(Direction::Output);
-    builder.setSharingMode(SharingMode::Exclusive);
     builder.setPerformanceMode(PerformanceMode::LowLatency);
     builder.setFormat(AudioFormat::Float);
     builder.setChannelCount(channelCount_);
@@ -270,10 +269,21 @@ Result AudioEngine::createAudioStream() {
     builder.setContentType(ContentType::Music);
     builder.setCallback(this);
     
+    // Try Exclusive mode first
+    builder.setSharingMode(SharingMode::Exclusive);
     Result result = builder.openStream(audioStream_);
+    
     if (result != Result::OK) {
-        LOGE("Failed to open audio stream: %s", convertToText(result));
-        return result;
+        LOGD("Exclusive mode failed: %s, trying Shared mode", convertToText(result));
+        builder.setSharingMode(SharingMode::Shared);
+        result = builder.openStream(audioStream_);
+        if (result != Result::OK) {
+            LOGE("Failed to open audio stream in Shared mode: %s", convertToText(result));
+            return result;
+        }
+        LOGI("Audio stream opened in Shared mode");
+    } else {
+        LOGI("Audio stream opened in Exclusive mode");
     }
     
     sampleRate_ = audioStream_->getSampleRate();
