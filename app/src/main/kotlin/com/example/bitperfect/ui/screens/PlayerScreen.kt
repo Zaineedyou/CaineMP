@@ -37,7 +37,7 @@ import java.io.File
  * - Real-time playback state
  */
 @Composable
-fun PlayerScreen(context: Context) {
+fun PlayerScreen(context: Context, permissionsGranted: Boolean = false) {
     val audioPlayerManager = remember { AudioPlayerManager(context) }
     
     // Initialize audio player
@@ -52,9 +52,13 @@ fun PlayerScreen(context: Context) {
     var selectedFile by remember { mutableStateOf<File?>(null) }
     var audioFiles by remember { mutableStateOf<List<File>>(emptyList()) }
     
-    // Load audio files from Music directory
-    LaunchedEffect(Unit) {
-        audioFiles = getAudioFiles(context)
+    // Load audio files from Music directory (only if permissions granted)
+    LaunchedEffect(permissionsGranted) {
+        if (permissionsGranted) {
+            audioFiles = getAudioFiles(context)
+        } else {
+            audioFiles = emptyList()
+        }
     }
     
     // Update playback state periodically
@@ -82,6 +86,25 @@ fun PlayerScreen(context: Context) {
             color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.padding(bottom = 16.dp)
         )
+        
+        // Permission warning (if not granted)
+        if (!permissionsGranted) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer
+                )
+            ) {
+                Text(
+                    text = "⚠️ Permission Required\nPlease grant audio and file access permissions to use this app.",
+                    modifier = Modifier.padding(12.dp),
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    fontSize = 12.sp
+                )
+            }
+        }
         
         // File List
         Text(

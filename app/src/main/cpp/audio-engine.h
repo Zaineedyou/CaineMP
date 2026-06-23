@@ -7,6 +7,8 @@
 #include <vector>
 #include <atomic>
 #include <mutex>
+#include <media/NdkMediaExtractor.h>
+#include <media/NdkMediaCodec.h>
 
 using namespace oboe;
 
@@ -159,12 +161,20 @@ private:
     void closeAudioStream();
     
     /**
-     * Decode audio file and fill buffer (stub for Milestone 2).
+     * Decode audio file (WAV or MP3) and fill buffer.
      * 
      * @param filePath Path to audio file
      * @return true if successful
      */
     bool decodeAudioFile(const std::string& filePath);
+    
+    /**
+     * Decode MP3 file using AMediaExtractor + AMediaCodec.
+     * 
+     * @param filePath Path to MP3 file
+     * @return true if successful
+     */
+    bool decodeMp3File(const std::string& filePath);
     
     /**
      * Fill audio buffer with PCM data from file.
