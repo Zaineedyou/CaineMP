@@ -37,7 +37,7 @@ import java.io.File
  * - Real-time playback state
  */
 @Composable
-fun PlayerScreen(context: Context) {
+fun PlayerScreen(context: Context, permissionsGranted: Boolean = false) {
     val audioPlayerManager = remember { AudioPlayerManager(context) }
     
     // Initialize audio player
