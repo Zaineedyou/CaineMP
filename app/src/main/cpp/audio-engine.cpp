@@ -10,17 +10,18 @@
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
 
+// WAV file format structures
 #pragma pack(push, 1)
 struct WavHeader {
-    char riffId[4];
-    uint32_t riffSize;
-    char waveId[4];
+    char riffId[4];        // "RIFF"
+    uint32_t riffSize;     // File size - 8
+    char waveId[4];        // "WAVE"
 };
 
 struct WavFmtChunk {
-    char chunkId[4];
-    uint32_t chunkSize;
-    uint16_t audioFormat;
+    char chunkId[4];       // "fmt "
+    uint32_t chunkSize;    // 16 for PCM
+    uint16_t audioFormat;  // 1 for PCM
     uint16_t numChannels;
     uint32_t sampleRate;
     uint32_t byteRate;
@@ -29,133 +30,222 @@ struct WavFmtChunk {
 };
 
 struct WavDataChunk {
-    char chunkId[4];
-    uint32_t chunkSize;
+    char chunkId[4];       // "data"
+    uint32_t chunkSize;    // Data size in bytes
 };
 #pragma pack(pop)
 
+// ==================== Constructor & Destructor ====================
+
 AudioEngine::AudioEngine()
-    : sessionId_(0), sampleRate_(48000), channelCount_(2), framesPerBurst_(0) {
-    LOGI("AudioEngine constructor");
+    : sessionId_(0),
+      sampleRate_(48000),
+      channelCount_(2),
+      framesPerBurst_(0) {
+    LOGI("AudioEngine constructor called");
     audioBuffer_.resize(AUDIO_BUFFER_SIZE * channelCount_);
 }
 
 AudioEngine::~AudioEngine() {
-    LOGI("AudioEngine destructor");
+    LOGI("AudioEngine destructor called");
+    stop();
     closeAudioStream();
 }
 
-bool AudioEngine::initialize() {
-    LOGI("Initializing audio engine");
-    if (createAudioStream() != Result::OK) {
-        LOGE("Failed to create audio stream");
-        return false;
+// ==================== Public Methods ====================
+
+int32_t AudioEngine::initialize() {
+    LOGI("Initializing AudioEngine with AAudio Exclusive Mode");
+    
+    if (audioStream_ != nullptr) {
+        LOGD("Audio stream already initialized");
+        return sessionId_;
     }
+    
+    Result result = createAudioStream();
+    if (result != Result::OK) {
+        LOGE("Failed to create audio stream: %s", convertToText(result));
+        return 0;
+    }
+    
     sessionId_ = audioStream_->getSessionId();
-    LOGI("Audio engine initialized, sessionId=%d", sessionId_);
-    return true;
+    LOGI("Audio engine initialized with session ID: %d", sessionId_);
+    
+    return sessionId_;
 }
 
 bool AudioEngine::playFile(const std::string& filePath) {
     LOGI("Playing file: %s", filePath.c_str());
     
-    if (!decodeAudioFile(filePath)) {
-        LOGE("Failed to decode file");
-        return false;
-    }
-    
-    if (!audioStream_) {
+    if (audioStream_ == nullptr) {
         LOGE("Audio stream not initialized");
         return false;
     }
     
-    if (audioStream_->getState() == StreamState::Uninitialized) {
-        LOGE("Stream uninitialized");
+    if (!decodeAudioFile(filePath)) {
+        LOGE("Failed to decode audio file: %s", filePath.c_str());
         return false;
     }
+    
+    currentPositionMs_.store(0);
+    bufferReadPos_.store(0);
+    
+    isPlaying_.store(true);
+    isPaused_.store(false);
     
     Result result = audioStream_->requestStart();
     if (result != Result::OK) {
-        LOGE("Failed to start stream: %s", convertToText(result));
+        LOGE("Failed to start audio stream: %s", convertToText(result));
+        isPlaying_.store(false);
         return false;
     }
     
-    isPlaying_.store(true);
-    LOGI("Playback started");
+    LOGI("Playback started successfully");
     return true;
 }
 
-void AudioEngine::pausePlayback() {
-    if (!audioStream_) return;
-    audioStream_->requestPause();
-    isPlaying_.store(false);
-    LOGI("Playback paused");
+void AudioEngine::pause() {
+    LOGI("Pausing playback");
+    
+    if (!isPlaying_.load()) {
+        LOGD("Not currently playing");
+        return;
+    }
+    
+    isPaused_.store(true);
+    
+    if (audioStream_ != nullptr) {
+        Result result = audioStream_->pause();
+        if (result != Result::OK) {
+            LOGE("Failed to pause audio stream: %s", convertToText(result));
+        }
+    }
 }
 
-void AudioEngine::stopPlayback() {
-    if (!audioStream_) return;
-    audioStream_->requestStop();
+void AudioEngine::resume() {
+    LOGI("Resuming playback");
+    
+    if (!isPaused_.load()) {
+        LOGD("Not paused");
+        return;
+    }
+    
+    isPaused_.store(false);
+    
+    if (audioStream_ != nullptr) {
+        Result result = audioStream_->start();
+        if (result != Result::OK) {
+            LOGE("Failed to resume audio stream: %s", convertToText(result));
+        }
+    }
+}
+
+void AudioEngine::stop() {
+    LOGI("Stopping playback");
+    
+    if (audioStream_ != nullptr) {
+        audioStream_->requestStop();
+    }
+    
     isPlaying_.store(false);
-    audioBufferPosition_.store(0);
-    LOGI("Playback stopped");
+    isPaused_.store(false);
+    currentPositionMs_.store(0);
+    bufferReadPos_.store(0);
+    bufferWritePos_.store(0);
 }
 
 void AudioEngine::seekTo(int64_t positionMs) {
-    int64_t framesToSeek = (positionMs * sampleRate_) / 1000;
-    audioBufferPosition_.store(framesToSeek);
-    LOGI("Seek to %" PRId64 " ms", positionMs);
+    LOGI("Seeking to position: %" PRId64 " ms", positionMs);
+    
+    if (durationMs_.load() <= 0) {
+        LOGD("No audio file loaded");
+        return;
+    }
+    
+    if (positionMs < 0) {
+        positionMs = 0;
+    } else if (positionMs > durationMs_.load()) {
+        positionMs = durationMs_.load();
+    }
+    
+    int64_t samplePosition = (positionMs * sampleRate_ * channelCount_) / 1000;
+    
+    {
+        std::lock_guard<std::mutex> lock(bufferMutex_);
+        bufferReadPos_.store(samplePosition % audioBuffer_.size());
+    }
+    
+    currentPositionMs_.store(positionMs);
+    LOGI("Seek completed to %" PRId64 " ms", positionMs);
 }
 
-int64_t AudioEngine::getCurrentPosition() {
-    int64_t pos = audioBufferPosition_.load();
-    return (pos * 1000) / sampleRate_;
-}
-
-int64_t AudioEngine::getDuration() {
-    return (audioBufferSize_ * 1000) / (sampleRate_ * channelCount_ * sizeof(float));
-}
-
-std::string AudioEngine::getStreamInfo() {
-    char buffer[256];
-    snprintf(buffer, sizeof(buffer), "SR:%dHz|Ch:%d|Playing:%s",
-             sampleRate_, channelCount_, isPlaying_.load() ? "Yes" : "No");
-    return std::string(buffer);
-}
-
-int32_t AudioEngine::getSessionId() {
+int32_t AudioEngine::getSessionId() const {
     return sessionId_;
 }
 
-DataCallbackResult AudioEngine::onAudioReady(AudioStream* audioStream, void* audioData, int32_t numFrames) {
-    if (!isPlaying_.load()) {
-        memset(audioData, 0, numFrames * channelCount_ * sizeof(float));
+int64_t AudioEngine::getCurrentPosition() const {
+    return currentPositionMs_.load();
+}
+
+int64_t AudioEngine::getDuration() const {
+    return durationMs_.load();
+}
+
+bool AudioEngine::isPlaying() const {
+    return isPlaying_.load() && !isPaused_.load();
+}
+
+std::string AudioEngine::getStreamInfo() const {
+    if (audioStream_ == nullptr) {
+        return "Stream not initialized";
+    }
+    
+    char buffer[256];
+    snprintf(buffer, sizeof(buffer),
+        "SR=%d Hz|Ch=%d|Fmt=%s|Mode=%s|Perf=%s|Burst=%d|SID=%d",
+        audioStream_->getSampleRate(),
+        audioStream_->getChannelCount(),
+        convertToText(audioStream_->getFormat()),
+        convertToText(audioStream_->getSharingMode()),
+        convertToText(audioStream_->getPerformanceMode()),
+        audioStream_->getFramesPerBurst(),
+        sessionId_);
+    
+    return std::string(buffer);
+}
+
+// ==================== AudioStreamCallback Implementation ====================
+
+DataCallbackResult AudioEngine::onAudioReady(
+    AudioStream* audioStream,
+    void* audioData,
+    int32_t numFrames) {
+    
+    if (!isPlaying_.load() || isPaused_.load()) {
+        std::memset(audioData, 0, numFrames * audioStream->getChannelCount() * sizeof(float));
         return DataCallbackResult::Continue;
     }
     
-    float* outputBuffer = static_cast<float*>(audioData);
-    int64_t pos = audioBufferPosition_.load();
-    int64_t maxPos = audioBufferSize_ / (channelCount_ * sizeof(float));
+    int32_t framesWritten = fillAudioBuffer(
+        static_cast<float*>(audioData),
+        numFrames);
     
-    for (int32_t i = 0; i < numFrames; i++) {
-        if (pos + i >= maxPos) {
-            isPlaying_.store(false);
-            memset(outputBuffer + i * channelCount_, 0, (numFrames - i) * channelCount_ * sizeof(float));
-            return DataCallbackResult::Stop;
-        }
+    int64_t positionMs = (bufferReadPos_.load() * 1000) / 
+                         (sampleRate_ * channelCount_);
+    currentPositionMs_.store(positionMs);
+    
+    if (framesWritten < numFrames) {
+        float* buffer = static_cast<float*>(audioData);
+        int32_t remainingFrames = numFrames - framesWritten;
+        std::memset(
+            buffer + (framesWritten * audioStream->getChannelCount()),
+            0,
+            remainingFrames * audioStream->getChannelCount() * sizeof(float));
         
-        int64_t bufferIdx = (pos + i) * channelCount_;
-        for (int ch = 0; ch < channelCount_; ch++) {
-            outputBuffer[i * channelCount_ + ch] = audioBuffer_[bufferIdx + ch];
-        }
+        isPlaying_.store(false);
     }
     
-    audioBufferPosition_.store(pos + numFrames);
     return DataCallbackResult::Continue;
-}
-
-void AudioEngine::onErrorBeforeClose(AudioStream* audioStream, Result error) {
-    LOGE("Audio stream error before close: %s", convertToText(error));
-    isPlaying_.store(false);
 }
 
 void AudioEngine::onErrorAfterClose(AudioStream* audioStream, Result error) {
@@ -163,11 +253,15 @@ void AudioEngine::onErrorAfterClose(AudioStream* audioStream, Result error) {
     isPlaying_.store(false);
 }
 
+// ==================== Private Helper Methods ====================
+
 Result AudioEngine::createAudioStream() {
-    LOGI("Creating AAudio stream");
+    LOGI("Creating AAudio stream with Exclusive Mode");
     
     AudioStreamBuilder builder;
+    
     builder.setDirection(Direction::Output);
+    builder.setSharingMode(SharingMode::Exclusive);
     builder.setPerformanceMode(PerformanceMode::LowLatency);
     builder.setFormat(AudioFormat::Float);
     builder.setChannelCount(channelCount_);
@@ -176,184 +270,228 @@ Result AudioEngine::createAudioStream() {
     builder.setContentType(ContentType::Music);
     builder.setCallback(this);
     
-    builder.setSharingMode(SharingMode::Exclusive);
     Result result = builder.openStream(audioStream_);
-    if (result == Result::OK) {
-        LOGI("Exclusive mode OK");
-    } else {
-        LOGD("Exclusive failed, trying Shared: %s", convertToText(result));
-        builder.setSharingMode(SharingMode::Shared);
-        result = builder.openStream(audioStream_);
-        if (result != Result::OK) {
-            LOGE("Shared mode failed: %s", convertToText(result));
-            return result;
-        }
-        LOGI("Shared mode OK");
+    if (result != Result::OK) {
+        LOGE("Failed to open audio stream: %s", convertToText(result));
+        return result;
     }
     
     sampleRate_ = audioStream_->getSampleRate();
     channelCount_ = audioStream_->getChannelCount();
     framesPerBurst_ = audioStream_->getFramesPerBurst();
-    LOGI("Stream: SR=%d Hz, Ch=%d", sampleRate_, channelCount_);
+    
+    LOGI("Audio stream created: SR=%d Hz, Ch=%d", sampleRate_, channelCount_);
+    
     return Result::OK;
 }
 
 void AudioEngine::closeAudioStream() {
     LOGI("Closing audio stream");
-    if (audioStream_) {
+    
+    if (audioStream_ != nullptr) {
         audioStream_->close();
         audioStream_.reset();
     }
+    
+    sessionId_ = 0;
 }
 
 bool AudioEngine::decodeAudioFile(const std::string& filePath) {
-    if (filePath.length() > 4) {
-        std::string ext = filePath.substr(filePath.length() - 4);
-        if (ext == ".mp3" || ext == ".MP3") {
-            return decodeMp3File(filePath);
-        }
-    }
-    return decodeWavFile(filePath);
-}
-
-bool AudioEngine::decodeMp3File(const std::string& filePath) {
-    LOGI("Decoding MP3: %s", filePath.c_str());
-    
-    AMediaExtractor* extractor = AMediaExtractor_new();
-    if (!extractor) {
-        LOGE("Failed to create extractor");
-        return false;
-    }
-    
-    if (AMediaExtractor_setDataSource(extractor, filePath.c_str()) != AMEDIA_OK) {
-        LOGE("Failed to set data source");
-        AMediaExtractor_delete(extractor);
-        return false;
-    }
-    
-    size_t trackCount = AMediaExtractor_getTrackCount(extractor);
-    int audioTrack = -1;
-    
-    for (size_t i = 0; i < trackCount; i++) {
-        AMediaFormat* format = AMediaExtractor_getTrackFormat(extractor, i);
-        const char* mime = nullptr;
-        AMediaFormat_getString(format, AMEDIAFORMAT_KEY_MIME, &mime);
-        
-        if (mime && strstr(mime, "audio")) {
-            audioTrack = i;
-            AMediaFormat_getInt32(format, AMEDIAFORMAT_KEY_SAMPLE_RATE, &sampleRate_);
-            AMediaFormat_getInt32(format, AMEDIAFORMAT_KEY_CHANNEL_COUNT, &channelCount_);
-            AMediaFormat_delete(format);
-            break;
-        }
-        AMediaFormat_delete(format);
-    }
-    
-    if (audioTrack < 0) {
-        LOGE("No audio track found");
-        AMediaExtractor_delete(extractor);
-        return false;
-    }
-    
-    AMediaExtractor_selectTrack(extractor, audioTrack);
-    
-    AMediaFormat* format = AMediaExtractor_getTrackFormat(extractor, audioTrack);
-    AMediaCodec* codec = AMediaCodec_createDecoderByType("audio/mpeg");
-    if (!codec) {
-        LOGE("Failed to create decoder");
-        AMediaFormat_delete(format);
-        AMediaExtractor_delete(extractor);
-        return false;
-    }
-    
-    AMediaCodec_configure(codec, format, nullptr, nullptr, 0);
-    AMediaCodec_start(codec);
-    
-    audioBuffer_.clear();
-    audioBuffer_.resize(AUDIO_BUFFER_SIZE * channelCount_);
-    audioBufferSize_ = 0;
-    
-    bool eos = false;
-    while (!eos && audioBufferSize_ < AUDIO_BUFFER_SIZE * channelCount_) {
-        ssize_t inputIdx = AMediaCodec_dequeueInputBuffer(codec, 2000);
-        if (inputIdx >= 0) {
-            size_t bufSize = 0;
-            uint8_t* buf = AMediaCodec_getInputBuffer(codec, inputIdx, &bufSize);
-            ssize_t sampleSize = AMediaExtractor_readSampleData(extractor, buf, bufSize);
-            
-            if (sampleSize <= 0) {
-                AMediaCodec_queueInputBuffer(codec, inputIdx, 0, 0, 0, AMEDIACODEC_BUFFER_FLAG_END_OF_STREAM);
-                eos = true;
-            } else {
-                AMediaCodec_queueInputBuffer(codec, inputIdx, 0, sampleSize, 
-                                            AMediaExtractor_getSampleTime(extractor), 0);
-                AMediaExtractor_advance(extractor);
-            }
-        }
-        
-        AMediaCodecBufferInfo info;
-        ssize_t outputIdx = AMediaCodec_dequeueOutputBuffer(codec, &info, 2000);
-        if (outputIdx >= 0) {
-            size_t bufSize = 0;
-            uint8_t* buf = AMediaCodec_getOutputBuffer(codec, outputIdx, &bufSize);
-            
-            size_t framesToCopy = info.size / (channelCount_ * sizeof(float));
-            if (audioBufferSize_ + framesToCopy * channelCount_ <= AUDIO_BUFFER_SIZE * channelCount_) {
-                memcpy(&audioBuffer_[audioBufferSize_], buf, info.size);
-                audioBufferSize_ += framesToCopy * channelCount_;
-            }
-            
-            AMediaCodec_releaseOutputBuffer(codec, outputIdx, false);
-        }
-    }
-    
-    AMediaCodec_stop(codec);
-    AMediaCodec_delete(codec);
-    AMediaFormat_delete(format);
-    AMediaExtractor_delete(extractor);
-    
-    LOGI("MP3 decoded: %zu samples", audioBufferSize_ / channelCount_);
-    return audioBufferSize_ > 0;
-}
-
-bool AudioEngine::decodeWavFile(const std::string& filePath) {
-    LOGI("Decoding WAV: %s", filePath.c_str());
+    LOGI("Decoding WAV file: %s", filePath.c_str());
     
     std::ifstream file(filePath, std::ios::binary);
     if (!file.is_open()) {
-        LOGE("Failed to open file");
+        LOGE("Failed to open file: %s", filePath.c_str());
         return false;
     }
     
+    // Read RIFF header
     WavHeader header;
-    file.read(reinterpret_cast<char*>(&header), sizeof(header));
-    if (strncmp(header.riffId, "RIFF", 4) != 0 || strncmp(header.waveId, "WAVE", 4) != 0) {
-        LOGE("Invalid WAV file");
+    file.read(reinterpret_cast<char*>(&header), sizeof(WavHeader));
+    
+    if (!file || std::strncmp(header.riffId, "RIFF", 4) != 0 || 
+        std::strncmp(header.waveId, "WAVE", 4) != 0) {
+        LOGE("Invalid WAV file format");
+        file.close();
         return false;
     }
     
-    WavFmtChunk fmt;
-    file.read(reinterpret_cast<char*>(&fmt), sizeof(fmt));
-    if (strncmp(fmt.chunkId, "fmt ", 4) != 0) {
-        LOGE("Invalid fmt chunk");
+    LOGI("Valid RIFF/WAVE header found");
+    
+    // Find fmt chunk
+    WavFmtChunk fmtChunk;
+    bool fmtFound = false;
+    
+    while (file.read(reinterpret_cast<char*>(&fmtChunk), 8)) {
+        if (std::strncmp(fmtChunk.chunkId, "fmt ", 4) == 0) {
+            fmtFound = true;
+            uint32_t fmtSize = fmtChunk.chunkSize;
+            file.read(reinterpret_cast<char*>(&fmtChunk) + 8, 
+                     std::min(fmtSize, (uint32_t)sizeof(WavFmtChunk) - 8));
+            break;
+        } else {
+            // Skip unknown chunk
+            file.seekg(fmtChunk.chunkSize, std::ios::cur);
+        }
+    }
+    
+    if (!fmtFound) {
+        LOGE("fmt chunk not found");
+        file.close();
         return false;
     }
     
-    sampleRate_ = fmt.sampleRate;
-    channelCount_ = fmt.numChannels;
-    
-    WavDataChunk data;
-    file.read(reinterpret_cast<char*>(&data), sizeof(data));
-    if (strncmp(data.chunkId, "data", 4) != 0) {
-        LOGE("Invalid data chunk");
+    if (fmtChunk.audioFormat != 1) {
+        LOGE("Only PCM audio format supported (format=%d)", fmtChunk.audioFormat);
+        file.close();
         return false;
     }
     
-    audioBuffer_.resize(data.chunkSize / sizeof(float));
-    file.read(reinterpret_cast<char*>(audioBuffer_.data()), data.chunkSize);
-    audioBufferSize_ = audioBuffer_.size();
-    audioBufferPosition_.store(0);
+    sampleRate_ = fmtChunk.sampleRate;
+    channelCount_ = fmtChunk.numChannels;
+    uint16_t bitsPerSample = fmtChunk.bitsPerSample;
     
-    LOGI("WAV decoded: %zu samples", audioBufferSize_ / channelCount_);
+    LOGI("WAV Format: SR=%d Hz, Ch=%d, BPS=%d", sampleRate_, channelCount_, bitsPerSample);
+    
+    if (bitsPerSample != 16 && bitsPerSample != 24 && bitsPerSample != 32) {
+        LOGE("Unsupported bits per sample: %d", bitsPerSample);
+        file.close();
+        return false;
+    }
+    
+    // Find data chunk
+    WavDataChunk dataChunk;
+    bool dataFound = false;
+    
+    while (file.read(reinterpret_cast<char*>(&dataChunk), 8)) {
+        if (std::strncmp(dataChunk.chunkId, "data", 4) == 0) {
+            dataFound = true;
+            break;
+        } else {
+            // Skip unknown chunk
+            file.seekg(dataChunk.chunkSize, std::ios::cur);
+        }
+    }
+    
+    if (!dataFound) {
+        LOGE("data chunk not found");
+        file.close();
+        return false;
+    }
+    
+    uint32_t dataSize = dataChunk.chunkSize;
+    uint32_t numSamples = dataSize / (bitsPerSample / 8);
+    uint32_t numFrames = numSamples / channelCount_;
+    
+    LOGI("WAV Data: %u bytes, %u samples, %u frames", dataSize, numSamples, numFrames);
+    
+    // Resize buffer to fit audio data
+    {
+        std::lock_guard<std::mutex> lock(bufferMutex_);
+        audioBuffer_.resize(numSamples);
+        bufferWritePos_.store(0);
+        bufferReadPos_.store(0);
+    }
+    
+    // Read and convert PCM data to float
+    std::vector<uint8_t> rawData(dataSize);
+    file.read(reinterpret_cast<char*>(rawData.data()), dataSize);
+    
+    if (!file) {
+        LOGE("Failed to read audio data");
+        file.close();
+        return false;
+    }
+    
+    file.close();
+    
+    // Convert PCM to float
+    {
+        std::lock_guard<std::mutex> lock(bufferMutex_);
+        
+        uint32_t sampleIndex = 0;
+        uint32_t byteIndex = 0;
+        uint32_t bytesPerSample = bitsPerSample / 8;
+        
+        while (byteIndex < dataSize && sampleIndex < audioBuffer_.size()) {
+            float sample = 0.0f;
+            
+            if (bitsPerSample == 16) {
+                int16_t pcmSample = *reinterpret_cast<int16_t*>(&rawData[byteIndex]);
+                sample = pcmSample / 32768.0f;  // Convert to [-1.0, 1.0]
+            } else if (bitsPerSample == 24) {
+                int32_t pcmSample = 0;
+                pcmSample |= rawData[byteIndex];
+                pcmSample |= (rawData[byteIndex + 1] << 8);
+                pcmSample |= (rawData[byteIndex + 2] << 16);
+                if (pcmSample & 0x800000) pcmSample |= 0xFF000000;  // Sign extend
+                sample = pcmSample / 8388608.0f;  // Convert to [-1.0, 1.0]
+            } else if (bitsPerSample == 32) {
+                int32_t pcmSample = *reinterpret_cast<int32_t*>(&rawData[byteIndex]);
+                sample = pcmSample / 2147483648.0f;  // Convert to [-1.0, 1.0]
+            }
+            
+            audioBuffer_[sampleIndex] = sample;
+            sampleIndex++;
+            byteIndex += bytesPerSample;
+        }
+        
+        bufferWritePos_.store(sampleIndex);
+    }
+    
+    // Calculate duration
+    int64_t durationMs = (numFrames * 1000) / sampleRate_;
+    durationMs_.store(durationMs);
+    
+    LOGI("WAV decoded successfully: %" PRId64 " ms duration", durationMs);
     return true;
+}
+
+int32_t AudioEngine::fillAudioBuffer(float* buffer, int32_t numFrames) {
+    if (buffer == nullptr || numFrames <= 0) {
+        return 0;
+    }
+    
+    int32_t framesRead = 0;
+    int32_t channelCount = audioStream_->getChannelCount();
+    
+    {
+        std::lock_guard<std::mutex> lock(bufferMutex_);
+        
+        size_t readPos = bufferReadPos_.load();
+        size_t writePos = bufferWritePos_.load();
+        
+        for (int32_t frame = 0; frame < numFrames; frame++) {
+            if (readPos >= writePos) {
+                break;
+            }
+            
+            for (int32_t ch = 0; ch < channelCount; ch++) {
+                buffer[frame * channelCount + ch] = audioBuffer_[readPos + ch];
+            }
+            
+            readPos += channelCount;
+            framesRead++;
+        }
+        
+        bufferReadPos_.store(readPos);
+    }
+    
+    return framesRead;
+}
+
+float AudioEngine::getNextSample() {
+    std::lock_guard<std::mutex> lock(bufferMutex_);
+    
+    size_t readPos = bufferReadPos_.load();
+    size_t writePos = bufferWritePos_.load();
+    
+    if (readPos >= writePos) {
+        return 0.0f;
+    }
+    
+    float sample = audioBuffer_[readPos];
+    bufferReadPos_.store(readPos + 1);
+    
+    return sample;
 }

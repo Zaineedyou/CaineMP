@@ -34,7 +34,6 @@ target_link_libraries(
     android
     log
     OpenSLES
-    mediandk
 )
 
 # Compiler flags
