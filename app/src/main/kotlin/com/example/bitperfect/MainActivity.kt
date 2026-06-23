@@ -1,5 +1,8 @@
 package com.example.bitperfect
 
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Bundle
@@ -16,7 +19,7 @@ import com.example.bitperfect.ui.theme.BitPerfectPlayerTheme
 
 class MainActivity : ComponentActivity() {
     
-    private var permissionsGranted = false
+    private var permissionsGranted by mutableStateOf(false)
     
     private val requestPermissionsLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
